@@ -41,8 +41,7 @@ enum FuzzySearch {
         if wordStartsWith(term, in: t) { return 0.9 }   // a word in the text begins with the term
         if t.hasPrefix(term) { return 0.85 }
         if t.contains(term) { return 0.6 }              // contiguous substring anywhere
-        if term.count >= 3, isSubsequence(term, in: t) { return 0.2 }  // weak, last-resort
-        return 0
+        return 0                                        // substring/word match only — no loose fuzzy
     }
 
     /// Any whitespace/punctuation-delimited word in `t` that starts with `term`.
@@ -51,15 +50,5 @@ enum FuzzySearch {
             if word.hasPrefix(term) { return true }
         }
         return false
-    }
-
-    /// All characters of `q` appear in `t` in order (not necessarily contiguous).
-    private static func isSubsequence(_ q: String, in t: String) -> Bool {
-        var qi = q.startIndex
-        for ch in t {
-            if qi == q.endIndex { break }
-            if ch == q[qi] { qi = q.index(after: qi) }
-        }
-        return qi == q.endIndex
     }
 }
