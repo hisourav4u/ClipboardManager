@@ -4,6 +4,7 @@ struct ClipboardHistoryView: View {
     @ObservedObject private var storage = ClipboardStorage.shared
     @ObservedObject var keyState: PopupKeyState
     @State private var searchText = ""
+    @State private var selectedCategory: ClipboardCategory = .all
     @State private var selectedIndex = 0
     @FocusState private var searchFocused: Bool
 
@@ -11,16 +12,35 @@ struct ClipboardHistoryView: View {
     var onPasteAndDismiss: (ClipboardEntry) -> Void
 
     private var filteredEntries: [ClipboardEntry] {
-        guard !searchText.isEmpty else { return storage.entries }
-        return storage.entries.filter { entry in
-            guard let text = entry.textContent, !text.isEmpty else { return entry.isImage }
-            return FuzzySearch.matches(query: searchText, in: text)
+        // 1) narrow by category (keeps storage order: pinned first, then recent)
+        var items = storage.entries
+        if selectedCategory != .all {
+            items = items.filter { $0.category == selectedCategory }
         }
+
+        // 2) no query -> return as-is
+        guard !searchText.isEmpty else { return items }
+
+        // 3) rank by match score, break ties by recency
+        return items
+            .compactMap { entry -> (ClipboardEntry, Double)? in
+                let s = FuzzySearch.score(query: searchText, in: entry.searchableText)
+                return s > 0 ? (entry, s) : nil
+            }
+            .sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0.timestamp > $1.0.timestamp }
+            .map { $0.0 }
+    }
+
+    /// Categories that actually have at least one entry (plus All), for the chip bar.
+    private var availableCategories: [ClipboardCategory] {
+        let present = Set(storage.entries.map(\.category))
+        return ClipboardCategory.allCases.filter { $0 == .all || present.contains($0) }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             searchBar
+            categoryBar
             Divider()
             bodyContent
             Divider()
@@ -31,6 +51,7 @@ struct ClipboardHistoryView: View {
         .shadow(color: .black.opacity(0.35), radius: 24, x: 0, y: 12)
         .onAppear { searchFocused = true }
         .onChange(of: searchText) { _, _ in selectedIndex = 0 }
+        .onChange(of: selectedCategory) { _, _ in selectedIndex = 0 }
         .onChange(of: storage.entries.count) { _, _ in clampIndex() }
         .onChange(of: keyState.upCount)     { _, _ in moveUp() }
         .onChange(of: keyState.downCount)   { _, _ in moveDown() }
@@ -63,6 +84,40 @@ struct ClipboardHistoryView: View {
     }
 
     @ViewBuilder
+    private var categoryBar: some View {
+        let cats = availableCategories
+        if cats.count > 1 {   // only show when there's more than just "All"
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(cats) { cat in
+                        categoryChip(cat)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+            }
+        }
+    }
+
+    private func categoryChip(_ cat: ClipboardCategory) -> some View {
+        let selected = selectedCategory == cat
+        return Button {
+            selectedCategory = cat
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: cat.icon).font(.system(size: 10, weight: .medium))
+                Text(cat.title).font(.system(size: 11, weight: .medium))
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(selected ? Color.accentColor : Color.secondary.opacity(0.15))
+            .foregroundStyle(selected ? Color.white : Color.primary)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
     private var bodyContent: some View {
         if filteredEntries.isEmpty {
             emptyState
@@ -87,14 +142,15 @@ struct ClipboardHistoryView: View {
                             onPin: { storage.togglePin(entry) },
                             onDelete: { deleteEntry(entry, at: index) }
                         )
-                        .id(index)
+                        .id(entry.id)   // stable identity so the list rebuilds when the filter changes
                     }
                 }
                 .padding(6)
             }
             .onChange(of: selectedIndex) { _, idx in
+                guard idx >= 0, idx < filteredEntries.count else { return }
                 withAnimation(.easeInOut(duration: 0.12)) {
-                    proxy.scrollTo(idx, anchor: .center)
+                    proxy.scrollTo(filteredEntries[idx].id, anchor: .center)
                 }
             }
         }
