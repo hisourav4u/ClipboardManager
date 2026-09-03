@@ -142,14 +142,15 @@ struct ClipboardHistoryView: View {
                             onPin: { storage.togglePin(entry) },
                             onDelete: { deleteEntry(entry, at: index) }
                         )
-                        .id(index)
+                        .id(entry.id)   // stable identity so the list rebuilds when the filter changes
                     }
                 }
                 .padding(6)
             }
             .onChange(of: selectedIndex) { _, idx in
+                guard idx >= 0, idx < filteredEntries.count else { return }
                 withAnimation(.easeInOut(duration: 0.12)) {
-                    proxy.scrollTo(idx, anchor: .center)
+                    proxy.scrollTo(filteredEntries[idx].id, anchor: .center)
                 }
             }
         }
